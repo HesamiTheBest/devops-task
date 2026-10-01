@@ -8,7 +8,7 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 REDIS_URL = os.environ["REDIS_URL"]
 
 app = FastAPI()
-r = redis.from_url(REDIS_URL , decode_response = True)
+r = redis.from_url(REDIS_URL , decode_responses = True)
 
 
 def db():
@@ -36,10 +36,18 @@ def get_items():
 
 @app.get("/health")
 def health():
-    try :
+    status = {}
+    try:
         with db() as conn:
             conn.execute("SELECT 1")
+        status["postgres"] = "ok"
+    except Exception as e:
+        status["postgres"] = f"error: {e}"
+    try:
         r.ping()
-    except  Exception :
-        raise HTTPException(status_code=503 , detail = "dependency down")
-    return {"status" : "ok"} 
+        status["redis"] = "ok"
+    except Exception as e:
+        status["redis"] = f"error: {e}"
+    if all(v == "ok" for v in status.values()):
+        return {"status": "ok", **status}
+    raise HTTPException(status_code=503, detail=status)
