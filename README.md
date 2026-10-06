@@ -51,6 +51,9 @@ docker compose down -v     # stops containers and deletes data
 └── .gitignore
 ```
 
+## Shortcuts
+`make up`, `make down`, `make logs`, `make ps`, `make clean`
+
 ## Technical decisions
 
 - **`python:3.12-slim` base image:** much smaller than a full OS image. Final image size: 59.4 MB.
