@@ -24,7 +24,7 @@ with db() as conn:
 def add_itedm(name : str):
     with db() as conn:
         conn.execute("INSERT INTO items (name) VALUES (%s)", (name,))
-    return {"added" : name}
+    return {"addedd" : name}
 
 
 @app.get("/items")
