@@ -50,9 +50,10 @@ docker compose down -v     # stops containers and deletes data
 ├── .dockerignore
 └── .gitignore
 ```
-
+## Development
+enables live realoading , bind mounting and a port for db using `make dev`
 ## Shortcuts
-`make up`, `make down`, `make logs`, `make ps`, `make clean`
+`make up`, `make down`, `make logs`, `make ps`, `make clean`, `dev`
 
 ## Technical decisions
 

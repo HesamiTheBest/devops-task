@@ -1,4 +1,4 @@
-.PHONY: up down logs ps clean
+.PHONY: up down logs ps clean dev
 
 up:
 	cp -n .env.example .env
@@ -14,4 +14,8 @@ ps:
 	docker compose ps
 
 clean:
-	docker compose down -v
+	docker compose down -
+	
+dev:
+	cp -n .env.example .env
+	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build 
