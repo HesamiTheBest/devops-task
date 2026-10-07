@@ -2,7 +2,9 @@ import os
 
 import psycopg
 import redis
+import socket
 from fastapi import FastAPI, HTTPException
+
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 REDIS_URL = os.environ["REDIS_URL"]
@@ -49,5 +51,5 @@ def health():
     except Exception as e:
         status["redis"] = f"error: {e}"
     if all(v == "ok" for v in status.values()):
-        return {"status": "ok", **status}
+        return {"status": "ok", "instance": socket.gethostname(), **status}
     raise HTTPException(status_code=503, detail=status)
