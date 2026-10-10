@@ -20,6 +20,7 @@ def db():
 
 with db() as conn:
     conn.execute("CREATE TABLE IF NOT EXISTS items (id SERIAL PRIMARY KEY, name TEXT)")
+    conn.execute("CREATE TABLE IF NOT EXISTS results (id SERIAL PRIMARY KEY, job TEXT, done_at TIMESTAMP DEFAULT now())")
 
 
 @app.post("/items")
@@ -53,3 +54,15 @@ def health():
     if all(v == "ok" for v in status.values()):
         return {"status": "ok", "instance": socket.gethostname(), **status}
     raise HTTPException(status_code=503, detail=status)
+
+@app.post("/jobs")
+def add_job(name: str):
+    r.lpush("jobs", name)
+    return {"queued": name}
+
+
+@app.get("/results")
+def get_results():
+    with db() as conn:
+        rows = conn.execute("SELECT id, job, done_at FROM results ORDER BY id").fetchall()
+    return {"results": rows}

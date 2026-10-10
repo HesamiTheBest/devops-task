@@ -1,40 +1,68 @@
 # DevOps Task: FastAPI + Postgres + Redis
 
-A small FastAPI service that stores items in **Postgres** and counts requests in **Redis**, containerized with Docker and run with Docker Compose.
+A small FastAPI service that stores items in **Postgres**, counts requests in **Redis**, and processes background jobs with a **worker**. It runs behind an **Nginx** reverse proxy with three API replicas, all managed by Docker Compose.
+
+## Architecture
+
+```
+                         +--> api (replica 1) --+
+client --> nginx :8080 --+--> api (replica 2) --+--> db (Postgres)
+                         +--> api (replica 3) --+--> redis
+                                                      ^
+                          worker  <-- jobs queue -----+
+                          worker  --> db (results)
+```
+
+| Service | Image | Role | Published port |
+|---------|-------|------|----------------|
+| `nginx` | `nginx:alpine` | Reverse proxy and load balancer | 8080 |
+| `api` (x3) | built from `Dockerfile` | FastAPI app | none |
+| `worker` | same image as `api` | Processes queued jobs | none |
+| `db` | `postgres:16-alpine` | Persistent storage | none |
+| `redis` | `redis:7-alpine` | Request counter and job queue | none |
 
 ## Run
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
+docker compose restart nginx
 ```
 
-The `.env` file holds the database credentials. `.env.example` contains placeholder values and can be used as is.
+Or use the shortcut, which does all three steps:
+
+```bash
+make up
+```
+
+`.env` holds the database credentials. `.env.example` contains placeholder values and can be used as is.
 
 Check that it works:
 
 ```bash
-curl localhost:8000/health
-curl -X POST "localhost:8000/items?name=test"
-curl localhost:8000/items
+curl localhost:8080/health
+curl -X POST "localhost:8080/items?name=test"
+curl localhost:8080/items
 ```
 
-Interactive API docs: http://localhost:8000/docs
+Interactive API docs: http://localhost:8080/docs
 
 Stop the system:
 
 ```bash
-docker compose down        # stops containers, keeps data
-docker compose down -v     # stops containers and deletes data
+make down      # stops containers, keeps data
+make clean     # stops containers and deletes data
 ```
 
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/health` | Checks Postgres and Redis. Returns 200, or 503 with the failing dependency |
+| GET | `/health` | Checks Postgres and Redis. Returns 200, or 503 with the failing dependency. Includes the `instance` that answered |
 | POST | `/items?name=...` | Stores an item in Postgres |
 | GET | `/items` | Lists items and increments a request counter in Redis |
+| POST | `/jobs?name=...` | Queues a background job and returns immediately |
+| GET | `/results` | Lists jobs finished by the worker |
 
 ## Project structure
 
@@ -42,69 +70,110 @@ docker compose down -v     # stops containers and deletes data
 .
 ├── app/
 │   ├── __init__.py
-│   └── main.py
+│   ├── main.py                 # API
+│   └── worker.py               # background worker
 ├── Dockerfile
-├── Makefile
 ├── docker-compose.yml
+├── docker-compose.dev.yml      # development overrides
+├── nginx.conf
+├── Makefile
 ├── requirements.txt
 ├── .env.example
 ├── .dockerignore
 └── .gitignore
 ```
-## Development
-
-`make dev` enables live reloading, bind mounting and a port for the database.
-
-## Shortcuts
-
-`make up`, `make down`, `make logs`, `make ps`, `make clean`, `make dev`, `make size`
-
-`make size` prints a size report: image sizes, the per-layer breakdown of `task-api` (`docker history`), and overall Docker disk usage.
 
 ## Technical decisions
 
-- **Multi-stage Dockerfile:** stage 1 (`python:3.12`, named `builder`) installs only the pip dependencies into a separate prefix (`--prefix=/install`); the final image starts fresh from `python:3.12-slim` and pulls in just those packages with `COPY --from=builder /install /usr/local`. Pip caches and anything the builder pulled in never enter the final image. Measured with `make size`: the old single-stage image was 59.5 MB, the multi-stage one is 56.1 MB. See [Multi-stage build: how it works](#multi-stage-build-how-it-works) for the full explanation.
-- **`python:3.12-slim` final base image:** much smaller than a full OS image.
+- **Multi-stage build on `python:3.12-slim`:** dependencies are installed in a builder stage and only the installed packages are copied into the final image, so build leftovers stay out of it.
 - **`requirements.txt` copied before the app code:** the dependency layer is cached, so code changes rebuild quickly.
-- **Healthchecks and `depends_on: condition: service_healthy`:** the API starts only after Postgres and Redis are ready, regardless of the order in which they come up.
-- **Named volume `pgdata`:** Postgres data survives `down` and `up`. Redis has no volume because it only holds a disposable counter.
+- **Healthchecks and `depends_on: condition: service_healthy`:** the API and worker start only after Postgres and Redis are ready, regardless of startup order.
+- **Named volume `pgdata`:** Postgres data survives `down` and `up`. Redis has no volume because it only holds a disposable counter and a job queue.
 - **Secrets in `.env`:** the file is git-ignored and never committed. `.env.example` has placeholders only.
-- **`db` and `redis` publish no ports:** only the API is reachable from the host. The API reaches the others by service name (`db`, `redis`) over the Compose network.
+- **`db` and `redis` publish no ports:** they are reachable only inside the Compose network, by service name (`db`, `redis`).
+- **Stateless API:** all state lives in Postgres and Redis, so any replica can answer any request.
 - **`restart: unless-stopped`:** services come back after a crash.
 
-## Multi-stage build: how it works
+## Image size and security
 
-The Dockerfile has two stages. Each `FROM` starts a completely separate, temporary environment, and files only cross over if you explicitly copy them with `COPY --from=<stage-name>`.
+- The first single-stage image was **59.4 MB**. The multi-stage image is **<NEW SIZE> MB** (check with `docker images task-api` and fill in).
+- The container runs as a **non-root user** (`appuser`) to limit the impact of a compromise:
 
-**Stage 1 — the builder (the "fat" environment):**
-
-```dockerfile
-FROM python:3.12 AS builder        # full image, ~1 GB unpacked. "AS builder" names the stage
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+```bash
+docker compose exec api whoami     # appuser
 ```
 
-`--prefix=/install` tells pip to install everything under `/install` instead of the usual `/usr/local`. That gives the dependencies one clean, known location to copy from later.
+- `.dockerignore` keeps `.env`, `.venv` and `.git` out of the image.
 
-**Stage 2 — the final image (clean start):**
+## Reverse proxy and replicas
 
-```dockerfile
-FROM python:3.12-slim              # fresh filesystem, ~45 MB, nothing from stage 1
-WORKDIR /app
-COPY --from=builder /install /usr/local   # reach INTO the builder and copy only this folder
-COPY app ./app
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+Nginx is the only service reachable from the host (port 8080). It forwards requests to the three `api` replicas using round-robin.
+
+- The `api` service publishes no ports. Several replicas cannot share one host port, and this keeps the API private (`curl localhost:8000` fails by design).
+- Compose DNS resolves the name `api` to the IP addresses of all replicas, and Nginx balances across them.
+- `/health` returns the `instance` field so the balancing is visible:
+
+```bash
+for i in 1 2 3 4 5 6; do curl -s localhost:8080/health; echo; done
 ```
 
-`COPY --from=builder` copies from the stage **by its name** (`AS builder`), not by a filesystem path. Because the final stage is a brand-new filesystem, whatever was not copied over physically does not exist in the final image — pip's temp files, the full Debian toolchain, everything.
+- Limitation: Nginx resolves `api` when it starts. After the API containers are recreated, Nginx needs a restart or it returns 502, so `make up` restarts it automatically.
 
-**Why not just install and delete in one stage?** Image layers are append-only. If a `RUN` installs gcc and a later `RUN` removes it, the removal is just a new layer on top — gcc still exists in the layer below, so the image never shrinks. Multi-stage works because it is not a deletion, it is a selective copy.
+## Background worker
 
-**Notes from doing it:**
-- Keeping `COPY requirements.txt .` before any other `COPY` inside the stage preserves the layer cache: code changes don't re-download dependencies.
-- `python:3.12` (full) in the builder is a one-time ~237 MB compressed download, cached forever after. The final image still only contains slim + the copied packages: **56.1 MB** (old single-stage: 59.5 MB), verified with `make size` and by running `python -c "import fastapi, uvicorn, redis, psycopg"` inside the new image.
-- Since `psycopg[binary]` ships precompiled wheels, no compiler is ever needed — `python:3.12-slim` would also work as the builder base. The full base is kept because it is the safe default if a dependency ever needs compiling.
+`POST /jobs?name=...` pushes a job onto a Redis list and returns immediately. A separate `worker` container (same image, different command) takes jobs from the list, processes them, and stores the result in Postgres. `GET /results` lists finished jobs.
+
+```
+POST /jobs -> api -> Redis list "jobs" -> worker -> Postgres (results table)
+```
+
+Try it:
+
+```bash
+curl -X POST "localhost:8080/jobs?name=job1"
+docker compose logs -f worker
+curl localhost:8080/results
+```
+
+## Development
+
+```bash
+make dev
+```
+
+This adds `docker-compose.dev.yml` on top of the base file:
+
+- the `app/` folder is bind-mounted, so code changes show up immediately
+- uvicorn runs with `--reload`
+- Postgres is published on host port 5433 for local inspection
+
+The dev file is not named `docker-compose.override.yml`, because Compose would load that automatically and the normal run would no longer match production. A dev run uses local files, so test with `make up` to verify the image itself.
+
+## Makefile shortcuts
+
+| Command | Description |
+|---------|-------------|
+| `make up` | Create `.env` if missing, build, start, restart Nginx |
+| `make dev` | Same, with the development overrides |
+| `make down` | Stop containers, keep data |
+| `make logs` | Follow the API logs |
+| `make ps` | Show container status |
+| `make clean` | Stop containers and delete volumes (data is lost) |
+| `make push` | Build, tag and push the image to Docker Hub |
+
+## Registry and versioning
+
+Image: `hesammardani/devops-task`
+
+Each release is tagged three ways:
+
+- `1.0.0`: the release version (semantic versioning, never overwritten)
+- `<git-sha>`: the commit the image was built from
+- `latest`: the newest release
+
+Pull: `docker pull hesammardani/devops-task:1.0.0`
+
+Note: `1.0.0` was the first published version and predates the non-root user, the Nginx proxy and the worker. Those changes are in the repository but not in a pushed image yet.
 
 ## A problem I faced
 
@@ -112,12 +181,7 @@ After the first `docker compose up`, `/health` returned a generic 503 (`dependen
 
 I fixed the typo and rebuilt the image with `docker compose up -d --build`, because the code is copied into the image at build time and a plain restart would not pick up the change.
 
-### Second problem: the multi-stage build refused to build, then "hung" on a 236 MB download
+## Other problems and fixes
 
-Two separate issues, and only one of them was a real bug.
-
-**Bug 1 — `COPY --from` syntax.** I wrote the copy from the builder stage across two lines with a wrong `--from` value (`COPY --from=y` on one line, `builder /install /usr/local` on the next). Docker reads a Dockerfile line by line, so this fails to parse, and `--from` expects the *stage name* from `AS builder` anyway — not a path (the leading `/` is a giveaway something is off: paths point into a filesystem, stage names are labels). Fixed as one line: `COPY --from=builder /install /usr/local`.
-
-**Not a bug — the 236 MB "hang".** While testing the build, it sat for minutes downloading one 236 MB layer and I assumed something was broken. What was actually happening: the builder stage uses full `python:3.12` (~1 GB unpacked, ~237 MB compressed), which had never been pulled before, and the connection was slow (~0.5 MB/s). The final `python:3.12-slim` base was already local, which is why only the builder triggered a download. Watching `docker build` output closely (layer digests + progress in bytes) instead of just waiting blindly made this obvious. It is a one-time cost — the layer is cached, and subsequent builds skip it.
-
-Lesson: distinguish "the build is doing something expensive but expected" from "the build is failing". The first shows steady progress on a recognizable layer; the second shows an error with a step number (`#11` etc.) that you can look up in the same log.
+- **Nginx returned 502 after rebuilding:** Nginx kept the old IP addresses of the recreated API containers. Restarting Nginx fixes it, and `make up` now does this automatically.
+- **The worker kept restarting with a Redis `TimeoutError`:** the client gave up while waiting on an empty queue. Fixed with `socket_timeout=None` and a `brpop` timeout so the loop keeps running.
