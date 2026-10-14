@@ -1,8 +1,8 @@
 import os
+import socket
 
 import psycopg
 import redis
-import socket
 from fastapi import FastAPI, HTTPException
 
 
