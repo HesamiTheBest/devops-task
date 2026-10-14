@@ -4,6 +4,8 @@ import socket
 import psycopg
 import redis
 from fastapi import FastAPI, HTTPException
+from psycopg import OperationalError
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -44,12 +46,12 @@ def health():
         with db() as conn:
             conn.execute("SELECT 1")
         status["postgres"] = "ok"
-    except Exception as e:
+    except OperationalError as e:
         status["postgres"] = f"error: {e}"
     try:
         r.ping()
         status["redis"] = "ok"
-    except Exception as e:
+    except RedisConnectionError as e:
         status["redis"] = f"error: {e}"
     if all(v == "ok" for v in status.values()):
         return {"status": "ok", "instance": socket.gethostname(), **status}
