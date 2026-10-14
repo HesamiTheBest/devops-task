@@ -1,5 +1,7 @@
 # DevOps Task: FastAPI + Postgres + Redis
 
+[![CI](https://github.com/HesamiTheBest/devops-task/actions/workflows/ci.yml/badge.svg)](https://github.com/HesamiTheBest/devops-task/actions/workflows/ci.yml)
+
 A small FastAPI service that stores items in **Postgres**, counts requests in **Redis**, and processes background jobs with a **worker**. It runs behind an **Nginx** reverse proxy with three API replicas, all managed by Docker Compose.
 
 ## Architecture
@@ -73,6 +75,9 @@ make clean     # stops containers and deletes data
 │   ├── main.py                 # API
 │   └── worker.py               # background worker
 ├── Dockerfile
+├── .github/
+│   └── workflows/
+│       └── ci.yml                # CI/CD pipeline
 ├── docker-compose.yml
 ├── docker-compose.dev.yml      # development overrides
 ├── nginx.conf
@@ -173,7 +178,25 @@ Each release is tagged three ways:
 
 Pull: `docker pull hesammardani/devops-task:1.0.0`
 
-Note: `1.0.0` was the first published version and predates the non-root user, the Nginx proxy and the worker. Those changes are in the repository but not in a pushed image yet.
+Note: `1.0.0` was the first published version and predates the non-root user, the Nginx proxy and the worker. Since the CI pipeline exists, every push to `main` automatically publishes fresh `latest` and `<commit-sha>` tags; the version tag `1.0.0` is only bumped manually for real releases.
+
+## CI/CD (GitHub Actions)
+
+The pipeline lives in `.github/workflows/ci.yml` and runs on every push to `main` and on every pull request.
+
+| Job | What it does | Runs on |
+|-----|--------------|---------|
+| `lint` | `ruff check app/` catches style issues, unsorted imports and blind exception catches | every push and PR |
+| `docker-build` | Builds the Docker image on a clean VM with BuildKit, using the GitHub Actions cache so the base layers are not re-downloaded every run. Does **not** push | every push and PR |
+| `docker-push` | Logs into Docker Hub with repository secrets and pushes `latest` + the full commit SHA tag | only after `lint` and `docker-build` pass, and only on `main` |
+
+Design points:
+
+- **CI and CD are separated by one line:** `docker-push` has `if: github.ref == 'refs/heads/main'`, so pull requests can build but never deploy.
+- **Deployment is gated:** `needs: [lint, docker-build]` means a commit that fails lint or cannot build never reaches Docker Hub.
+- **Two tags on purpose:** `latest` is the moving pointer; the commit SHA tag is immutable and is what you use to answer "what exactly is running?" or to roll back.
+- **Secrets (`DOCKER_USERNAME`, `DOCKER_PASSWORD`)** are repository secrets, never committed. A missing secret resolves to an empty string at runtime — GitHub does not warn you, which is why the login step once failed with `Username and password required`.
+- The build cache (`cache-from/cache-to: type=gha`) exists because runners are fresh VMs: without it, every push would re-download the ~237 MB builder base image.
 
 ## A problem I faced
 
@@ -185,3 +208,4 @@ I fixed the typo and rebuilt the image with `docker compose up -d --build`, beca
 
 - **Nginx returned 502 after rebuilding:** Nginx kept the old IP addresses of the recreated API containers. Restarting Nginx fixes it, and `make up` now does this automatically.
 - **The worker kept restarting with a Redis `TimeoutError`:** the client gave up while waiting on an empty queue. Fixed with `socket_timeout=None` and a `brpop` timeout so the loop keeps running.
+- **Ruff flagged `except Exception` in `/health` (BLE001):** a blind catch would hide real code bugs (like the `decode_response` typo) behind a 503 "dependency down". Narrowed both catches to `psycopg.OperationalError` and `redis.exceptions.ConnectionError`, so connection failures still produce a clean 503 but programming errors crash loudly instead of being disguised as a dependency outage.
