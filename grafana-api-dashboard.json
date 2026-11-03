@@ -1,0 +1,171 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": null,
+    "title": "DevOps Task - API Stress Test",
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "5s",
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "type": "stat",
+        "title": "Requests / sec",
+        "gridPos": {"x": 0, "y": 0, "w": 3, "h": 3},
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "targets": [
+          {"expr": "sum(rate(http_requests_total{job=\"api\"}[1m]))", "refId": "A", "instant": false}
+        ],
+        "fieldConfig": {
+          "defaults": {"unit": "reqps", "decimals": 0},
+          "overrides": []
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "orientation": "auto",
+          "reduceOptions": {"values": ["last"], "calcs": ["last"], "fields": ""},
+          "textMode": "value",
+          "text": {}
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Errors / sec (4xx)",
+        "gridPos": {"x": 3, "y": 0, "w": 3, "h": 3},
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "targets": [
+          {"expr": "sum(rate(http_requests_total{job=\"api\",status=~\"4..\"}[1m]))", "refId": "A", "instant": false}
+        ],
+        "fieldConfig": {
+          "defaults": {"unit": "reqps", "decimals": 0},
+          "overrides": []
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "orientation": "auto",
+          "reduceOptions": {"values": ["last"], "calcs": ["last"], "fields": ""},
+          "textMode": "value",
+          "text": {}
+        }
+      },
+      {
+        "type": "stat",
+        "title": "API Up",
+        "gridPos": {"x": 6, "y": 0, "w": 3, "h": 3},
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "targets": [
+          {"expr": "up{job=\"api\"}", "refId": "A", "instant": false}
+        ],
+        "fieldConfig": {
+          "defaults": {"unit": "bool", "decimals": 0},
+          "overrides": []
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "orientation": "auto",
+          "reduceOptions": {"values": ["last"], "calcs": ["last"], "fields": ""},
+          "textMode": "value",
+          "text": {}
+        }
+      },
+      {
+        "type": "stat",
+        "title": "Jobs Queue Length",
+        "gridPos": {"x": 9, "y": 0, "w": 3, "h": 3},
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "targets": [
+          {"expr": "jobs_queue_length{job=\"api\"}", "refId": "A", "instant": false}
+        ],
+        "fieldConfig": {
+          "defaults": {"unit": "short", "decimals": 0},
+          "overrides": []
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "orientation": "auto",
+          "reduceOptions": {"values": ["last"], "calcs": ["last"], "fields": ""},
+          "textMode": "value",
+          "text": {}
+        }
+      },
+      {
+        "type": "timeseries",
+        "title": "Request Rate by Endpoint",
+        "gridPos": {"x": 0, "y": 3, "w": 8, "h": 6},
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "targets": [
+          {"expr": "sum(rate(http_requests_total{job=\"api\"}[1m])) by (handler)", "refId": "A", "instant": false}
+        ],
+        "fieldConfig": {"defaults": {}, "overrides": []},
+        "options": {
+          "tooltip": {"mode": "multi"},
+          "legend": {"displayMode": "list", "placement": "right"},
+          "graphType": "line"
+        }
+      },
+      {
+        "type": "timeseries",
+        "title": "Latency p95 (seconds)",
+        "gridPos": {"x": 8, "y": 3, "w": 8, "h": 6},
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "targets": [
+          {"expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{job=\"api\"}[1m])) by (le, handler))", "refId": "A", "instant": false}
+        ],
+        "fieldConfig": {
+          "defaults": {"unit": "s", "decimals": 4},
+          "overrides": []
+        },
+        "options": {
+          "tooltip": {"mode": "multi"},
+          "legend": {"displayMode": "list", "placement": "right"},
+          "graphType": "line"
+        }
+      },
+      {
+        "type": "timeseries",
+        "title": "Errors (4xx) by Endpoint",
+        "gridPos": {"x": 0, "y": 9, "w": 8, "h": 6},
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "targets": [
+          {"expr": "sum(rate(http_requests_total{job=\"api\",status=~\"4..\"}[1m])) by (handler)", "refId": "A", "instant": false}
+        ],
+        "fieldConfig": {"defaults": {}, "overrides": []},
+        "options": {
+          "tooltip": {"mode": "multi"},
+          "legend": {"displayMode": "list", "placement": "right"},
+          "graphType": "line"
+        }
+      },
+      {
+        "type": "timeseries",
+        "title": "Total Throughput",
+        "gridPos": {"x": 8, "y": 9, "w": 8, "h": 6},
+        "datasource": {"type": "prometheus", "uid": "prometheus"},
+        "targets": [
+          {"expr": "sum(rate(http_requests_total{job=\"api\"}[1m]))", "refId": "A", "instant": false}
+        ],
+        "fieldConfig": {"defaults": {}, "overrides": []},
+        "options": {
+          "tooltip": {"mode": "multi"},
+          "legend": {"displayMode": "list", "placement": "right"},
+          "graphType": "line"
+        }
+      }
+    ],
+    "templating": {"list": []},
+    "annotations": {"list": []}
+  },
+  "overwrite": true
+}

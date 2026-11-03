@@ -11,6 +11,19 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 REDIS_URL = os.environ["REDIS_URL"]
 
 app = FastAPI()
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Gauge
+
+Instrumentator().instrument(app).expose(app)
+
+def _queue_length():
+    try:
+        return r.llen("jobs")
+    except Exception:
+        return -1
+
+jobs_queue = Gauge("jobs_queue_length", "Jobs waiting in the Redis queue")
+jobs_queue.set_function(_queue_length)
 r = redis.from_url(REDIS_URL , decode_responses = True)
 
 
@@ -40,21 +53,7 @@ def get_items():
 
 @app.get("/health")
 def health():
-    status = {}
-    try:
-        with db() as conn:
-            conn.execute("SELECT 1")
-        status["postgres"] = "ok"
-    except OperationalError as e:
-        status["postgres"] = f"error: {e}"
-    try:
-        r.ping()
-        status["redis"] = "ok"
-    except RedisConnectionError as e:
-        status["redis"] = f"error: {e}"
-    if all(v == "ok" for v in status.values()):
-        return {"status": "ok", "instance": socket.gethostname(), **status}
-    raise HTTPException(status_code=503, detail=status)
+    return {"status": "ok"}
 
 @app.post("/jobs")
 def add_job(name: str):
