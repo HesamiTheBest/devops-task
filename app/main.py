@@ -1,25 +1,22 @@
 import os
-import socket
 
 import psycopg
 import redis
-from fastapi import FastAPI, HTTPException
-from psycopg import OperationalError
-from redis.exceptions import ConnectionError as RedisConnectionError
+from fastapi import FastAPI
 
 DATABASE_URL = os.environ["DATABASE_URL"]
 REDIS_URL = os.environ["REDIS_URL"]
 
 app = FastAPI()
-from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Gauge
+from prometheus_fastapi_instrumentator import Instrumentator
 
 Instrumentator().instrument(app).expose(app)
 
 def _queue_length():
     try:
         return r.llen("jobs")
-    except Exception:
+    except redis.exceptions.RedisError:
         return -1
 
 jobs_queue = Gauge("jobs_queue_length", "Jobs waiting in the Redis queue")
