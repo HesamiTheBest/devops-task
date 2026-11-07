@@ -9,7 +9,7 @@ variables:
   PIP_INDEX_URL: "https://package-mirror.liara.ir/repository/pypi/simple"
   PIP_DEFAULT_TIMEOUT: "60"
   IMAGE: hesammardani/devops-task
-  DOCKER_HOST: top://docker:2375
+  DOCKER_HOST: tcp://docker:2375
   DOCKER_TLS_CERTDIR: ""
 
 .docker:
